@@ -548,7 +548,6 @@
     async function initCameraScanner() {
         if (!video) return;
         
-        // First check if we can get camera at all
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
             scanStatusSpan.innerText = '❌ Browser doesn\'t support camera API';
             console.error('getUserMedia not supported');
@@ -556,16 +555,25 @@
         }
         
         try {
-            scanStatusSpan.innerText = '📷 Requesting camera permission...';
+            scanStatusSpan.innerText = '📷 Requesting back camera...';
             
-            // Try with simpler constraints first (more compatible)
-            const stream = await navigator.mediaDevices.getUserMedia({ 
-                video: true  // Remove facingMode constraint for testing
-            });
+            // Try back camera first (environment facing)
+            let stream;
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: { exact: "environment" } }
+                });
+            } catch (err) {
+                // If exact fails, try 'environment' without exact (more compatible)
+                console.log('Exact environment failed, trying fallback...');
+                stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: "environment" }
+                });
+            }
             
             video.srcObject = stream;
             await video.play();
-            scanStatusSpan.innerText = '✅ Camera ready · scanning offline';
+            scanStatusSpan.innerText = '✅ Back camera ready · scanning offline';
             isScanningActive = true;
             
             if (window.ZXing) {
@@ -580,26 +588,49 @@
                         if (possibleIsbn.length === 10 || possibleIsbn.length === 13 || 
                             (possibleIsbn.length === 12 && /^\d+$/.test(possibleIsbn))) {
                             addBook(possibleIsbn);
+                        } else if (barcodeText.length >= 8 && /^\d+$/.test(barcodeText)) {
+                            addBook(barcodeText);
+                        } else {
+                            scanStatusSpan.innerText = `⚠️ not a book code: ${barcodeText.substring(0,12)}`;
+                            setTimeout(() => {
+                                if(isScanningActive) scanStatusSpan.innerText = '📷 ready - scan barcode';
+                            }, 1000);
                         }
                     }
                 });
             } else {
-                scanStatusSpan.innerText = '⚠️ ZXing library not loaded';
-                console.error('ZXing not available');
+                scanStatusSpan.innerText = '⚠️ scanner library error, reload page';
             }
         } catch (err) {
-            console.error("Camera error details:", err);
-            scanStatusSpan.innerText = `❌ ${err.message || 'Camera error'}`;
+            console.error("Camera error:", err);
+            scanStatusSpan.innerText = '❌ Back camera unavailable, trying default camera...';
             
-            // Helpful error messages
-            if (err.name === 'NotAllowedError') {
-                alert('Camera permission denied. Please:\n- Click the camera icon in the address bar\n- Or go to browser settings → Site Settings → Camera → Allow');
-            } else if (err.name === 'NotFoundError') {
-                alert('No camera found on this device');
-            } else if (err.name === 'NotReadableError') {
-                alert('Camera is in use by another application');
-            } else {
-                alert(`Camera error: ${err.message}\n\nMake sure you're on HTTPS or localhost`);
+            // Fallback to any camera if back camera fails
+            try {
+                const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                video.srcObject = fallbackStream;
+                await video.play();
+                scanStatusSpan.innerText = '⚠️ Using default camera (not back camera)';
+                isScanningActive = true;
+                
+                // Continue with scanning...
+                if (window.ZXing) {
+                    const { BrowserMultiFormatReader } = window.ZXing;
+                    const reader = new BrowserMultiFormatReader();
+                    currentScanner = reader;
+                    await reader.decodeFromVideoElement(video, (result, err) => {
+                        if (result) {
+                            const barcodeText = result.getText();
+                            let possibleIsbn = barcodeText.replace(/[^0-9X]/gi, '').toUpperCase();
+                            if (possibleIsbn.length === 10 || possibleIsbn.length === 13) {
+                                addBook(possibleIsbn);
+                            }
+                        }
+                    });
+                }
+            } catch (fallbackErr) {
+                scanStatusSpan.innerText = '❌ No camera access. Use manual entry';
+                alert('Camera access denied or no camera found.\n\nOn iPhone: Settings → Safari → Camera → Allow\nOn Android: Settings → Apps → Browser → Permissions → Camera');
             }
         }
     }
