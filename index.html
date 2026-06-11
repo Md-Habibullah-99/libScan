@@ -3,8 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>LibScan Offline · ISBN Scanner</title>
-    <!-- Local fallback: ZXing from CDN but will be cached by service worker -->
+    <title>LibScan · ISBN Scanner</title>
     <script type="text/javascript" src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
     <style>
         * {
@@ -56,10 +55,6 @@
             font-weight: normal;
         }
 
-        .offline-badge.offline-mode {
-            background: #f59e0b;
-        }
-
         .sub {
             color: #8e9aaf;
             font-weight: 500;
@@ -76,7 +71,7 @@
             position: relative;
             box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
             margin-bottom: 24px;
-            border: 1px solid rgba(66, 153, 225, 0.5);
+            border: 2px solid #3b82f6;
         }
 
         video {
@@ -93,7 +88,7 @@
             bottom: 16px;
             left: 16px;
             right: 16px;
-            background: rgba(0, 0, 0, 0.7);
+            background: rgba(0, 0, 0, 0.8);
             backdrop-filter: blur(12px);
             border-radius: 60px;
             padding: 8px 16px;
@@ -102,6 +97,19 @@
             font-weight: 500;
             font-size: 0.85rem;
             border: 0.5px solid rgba(255,255,255,0.3);
+        }
+
+        .scan-guide {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 80%;
+            height: 40%;
+            border: 3px solid #3b82f6;
+            border-radius: 16px;
+            box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5);
+            pointer-events: none;
         }
 
         .status-card {
@@ -282,15 +290,14 @@
             margin-top: 18px;
         }
 
-        .offline-warning {
-            background: #f59e0b20;
-            border: 1px solid #f59e0b40;
-            border-radius: 20px;
+        .debug-info {
+            background: #1a1f2c;
+            border-radius: 16px;
             padding: 8px 12px;
+            margin-top: 12px;
             font-size: 0.7rem;
-            margin-bottom: 12px;
-            text-align: center;
-            color: #fbbf24;
+            color: #8e9aaf;
+            font-family: monospace;
         }
     </style>
 </head>
@@ -298,28 +305,25 @@
 <div class="app-container">
     <h1>
         📚 LibScan 
-        <span id="offlineIndicator" class="offline-badge">🌐 Online</span>
+        <span class="offline-badge">🔴 Online Scanner</span>
     </h1>
-    <div class="sub">📖 offline barcode scanner · stores books locally</div>
+    <div class="sub">🎯 Point camera at ISBN barcode - auto scans!</div>
     
-    <div id="offlineWarning" class="offline-warning" style="display: none;">
-        ⚡ Offline Mode — Scanning works, book titles use local cache only
-    </div>
-
     <div class="camera-zone">
         <video id="video" playsinline autoplay muted></video>
         <div class="scan-overlay">
-            🔍 align barcode inside frame → auto captures ISBN
+            🔍 Position barcode inside the frame
         </div>
+        <div class="scan-guide"></div>
     </div>
 
     <div class="status-card">
-        <span class="status-badge" id="scanStatus">📷 initializing camera...</span>
+        <span class="status-badge" id="scanStatus">📷 Initializing camera...</span>
         <span class="book-count" id="bookCountDisplay">0 books</span>
     </div>
 
     <div class="manual-section">
-        <div class="manual-title">✏️ manual entry (offline ready)</div>
+        <div class="manual-title">✏️ Or enter ISBN manually</div>
         <div class="isbn-manual">
             <input type="text" id="manualIsbn" placeholder="ISBN-10 or ISBN-13" autocomplete="off">
             <button id="manualAddBtn">➕ Add Book</button>
@@ -335,27 +339,27 @@
 
     <div style="margin-top: 6px;">
         <div style="display: flex; justify-content: space-between; align-items: baseline; padding: 0 8px;">
-            <span style="font-weight: 600; font-size: 0.85rem;">📋 scanned books</span>
+            <span style="font-weight: 600; font-size: 0.85rem;">📋 Scanned Books</span>
             <span style="font-size: 0.7rem; color:#6b7a9a;">tap ❌ to remove</span>
         </div>
         <div class="books-list" id="booksListContainer">
-            <div class="empty-msg">✨ no books yet. scan a barcode or enter ISBN manually</div>
+            <div class="empty-msg">✨ No books yet. Scan a barcode or enter ISBN manually</div>
         </div>
     </div>
-    <footer>💾 Fully offline after first load | Camera works without internet</footer>
+    
+    <div class="debug-info" id="debugInfo">
+        💡 Tip: Hold camera steady 10-15cm from barcode
+    </div>
+    <footer>📱 Works best on Chrome/Safari | Tap to focus if needed</footer>
 </div>
 
 <script>
-    // ---------- OFFLINE-FIRST BOOK MANAGER ----------
-    let books = [];            // array of { isbn, title, timestamp }
+    let books = [];
     let currentScanner = null;
     let isScanningActive = false;
-    let isOnline = navigator.onLine;
+    let lastScannedISBN = null;
+    let scanTimeout = null;
     
-    // Offline title cache (pre-populated with common patterns, grows as we fetch)
-    let offlineTitleCache = new Map();
-
-    // DOM elements
     const video = document.getElementById('video');
     const scanStatusSpan = document.getElementById('scanStatus');
     const bookCountSpan = document.getElementById('bookCountDisplay');
@@ -366,55 +370,21 @@
     const exportCsvBtn = document.getElementById('exportCsvBtn');
     const exportTxtBtn = document.getElementById('exportTxtBtn');
     const clearAllBtn = document.getElementById('clearAllBtn');
-    const offlineIndicator = document.getElementById('offlineIndicator');
-    const offlineWarningDiv = document.getElementById('offlineWarning');
+    const debugInfo = document.getElementById('debugInfo');
 
-    // Update online/offline UI
-    function updateOnlineStatus() {
-        isOnline = navigator.onLine;
-        if (isOnline) {
-            offlineIndicator.textContent = '🌐 Online';
-            offlineIndicator.classList.remove('offline-mode');
-            offlineWarningDiv.style.display = 'none';
-        } else {
-            offlineIndicator.textContent = '📴 Offline';
-            offlineIndicator.classList.add('offline-mode');
-            offlineWarningDiv.style.display = 'block';
-        }
-    }
-
-    window.addEventListener('online', updateOnlineStatus);
-    window.addEventListener('offline', updateOnlineStatus);
-    updateOnlineStatus();
-
-    // Save to localStorage (offline persistent)
+    // Save to localStorage
     function saveToLocalStorage() {
-        localStorage.setItem('library_books_offline', JSON.stringify(books));
-        // also save title cache for offline use
-        const cacheObj = Object.fromEntries(offlineTitleCache);
-        localStorage.setItem('lib_title_cache', JSON.stringify(cacheObj));
+        localStorage.setItem('library_books', JSON.stringify(books));
         updateUI();
     }
 
-    // Load stored books and title cache
+    // Load stored books
     function loadStoredData() {
-        const stored = localStorage.getItem('library_books_offline');
+        const stored = localStorage.getItem('library_books');
         if (stored) {
             try {
                 books = JSON.parse(stored);
-                books = books.filter(b => b && b.isbn).map(b => ({ ...b, title: b.title || 'ISBN only' }));
             } catch(e) { books = []; }
-        } else {
-            books = [];
-        }
-        
-        // Load cached titles for offline mode
-        const cachedTitles = localStorage.getItem('lib_title_cache');
-        if (cachedTitles) {
-            try {
-                const cacheObj = JSON.parse(cachedTitles);
-                offlineTitleCache = new Map(Object.entries(cacheObj));
-            } catch(e) {}
         }
         updateUI();
     }
@@ -422,18 +392,16 @@
     function updateUI() {
         bookCountSpan.innerText = `${books.length} book${books.length !== 1 ? 's' : ''}`;
         if (books.length === 0) {
-            booksContainer.innerHTML = `<div class="empty-msg">📭 no books yet. scan a barcode or enter ISBN manually</div>`;
+            booksContainer.innerHTML = `<div class="empty-msg">📭 No books yet. Scan a barcode or enter ISBN manually</div>`;
             return;
         }
         let html = `<div class="list-header"><span>📖 ISBN / Title</span><span>🗑️</span></div>`;
         books.forEach((book, idx) => {
-            const displayTitle = book.title && book.title !== 'ISBN only' ? 
-                (book.title.length > 48 ? book.title.slice(0,45)+'…' : book.title) : '📘 ' + (book.title || 'untitled');
             html += `
-                <div class="book-item" data-index="${idx}">
+                <div class="book-item">
                     <div style="display: flex; flex-direction: column; gap: 4px; flex:1;">
                         <span class="book-isbn">${escapeHtml(book.isbn)}</span>
-                        <span class="book-name">${escapeHtml(displayTitle)}</span>
+                        <span class="book-name">${escapeHtml(book.title)}</span>
                     </div>
                     <button class="delete-one" data-isbn="${escapeHtml(book.isbn)}">✖️</button>
                 </div>
@@ -451,6 +419,10 @@
     function removeBookByIsbn(isbn) {
         books = books.filter(b => b.isbn !== isbn);
         saveToLocalStorage();
+        scanStatusSpan.innerText = `🗑️ Removed ${isbn}`;
+        setTimeout(() => {
+            if(isScanningActive) scanStatusSpan.innerText = '📷 Ready - scan barcode';
+        }, 1500);
     }
 
     function escapeHtml(str) {
@@ -463,178 +435,157 @@
         });
     }
 
-    // OFFLINE-FIRST title fetcher: uses cache if offline, else tries network and caches result
-    async function fetchBookTitleOfflineFirst(isbn) {
+    // Fetch book title from OpenLibrary
+    async function fetchBookTitle(isbn) {
         const cleanIsbn = isbn.replace(/[-\s]/g, '');
-        if (!cleanIsbn) return null;
-        
-        // Check offline cache first
-        if (offlineTitleCache.has(cleanIsbn)) {
-            return offlineTitleCache.get(cleanIsbn);
-        }
-        
-        // If offline, return null (no network)
-        if (!navigator.onLine) {
-            return null;
-        }
-        
-        // Online: fetch from OpenLibrary
         try {
             const url = `https://openlibrary.org/api/books?bibkeys=ISBN:${cleanIsbn}&format=json&jscmd=data`;
             const response = await fetch(url);
-            if (!response.ok) return null;
+            if (!response.ok) return `ISBN ${cleanIsbn}`;
             const data = await response.json();
             const key = `ISBN:${cleanIsbn}`;
             if (data[key] && data[key].title) {
                 let title = data[key].title;
                 if (data[key].subtitle) title += `: ${data[key].subtitle}`;
-                // Cache for offline use
-                offlineTitleCache.set(cleanIsbn, title);
-                // Persist cache to localStorage
-                const cacheObj = Object.fromEntries(offlineTitleCache);
-                localStorage.setItem('lib_title_cache', JSON.stringify(cacheObj));
                 return title;
             }
-            return null;
+            return `ISBN ${cleanIsbn}`;
         } catch (err) {
-            console.warn("Fetch failed, offline mode", err);
-            return null;
+            console.warn("Fetch failed:", err);
+            return `ISBN ${cleanIsbn}`;
         }
     }
 
-    // Core add book function (works fully offline)
-    async function addBook(isbnRaw, optionalTitle = null) {
+    // Add book to library
+    async function addBook(isbnRaw) {
         let cleanIsbn = isbnRaw.trim().replace(/[-\s]/g, '');
-        if (!cleanIsbn) {
-            scanStatusSpan.innerText = '⚠️ invalid ISBN';
-            return false;
-        }
         
-        // Basic ISBN validation (10 or 13 digits, or allow X for 10-digit)
+        // Validate ISBN format
         const isValid = /^[0-9]{10,13}$/.test(cleanIsbn) || /^[0-9]{9}[0-9X]$/i.test(cleanIsbn);
-        if (!isValid && cleanIsbn.length !== 10 && cleanIsbn.length !== 13) {
-            scanStatusSpan.innerText = `❌ invalid format: ${cleanIsbn}`;
-            setTimeout(() => { if(isScanningActive) scanStatusSpan.innerText = '📷 ready - scan barcode'; }, 1500);
+        if (!isValid || cleanIsbn.length < 10) {
+            scanStatusSpan.innerText = `❌ Invalid ISBN: ${cleanIsbn}`;
+            setTimeout(() => {
+                if(isScanningActive) scanStatusSpan.innerText = '📷 Ready - scan barcode';
+            }, 1500);
             return false;
         }
         
-        // Duplicate check
+        // Check for duplicates
         if (books.find(b => b.isbn === cleanIsbn)) {
             scanStatusSpan.innerText = `⚠️ ISBN ${cleanIsbn} already in library`;
-            setTimeout(() => { if(isScanningActive) scanStatusSpan.innerText = '📷 ready - scan next'; }, 1200);
+            setTimeout(() => {
+                if(isScanningActive) scanStatusSpan.innerText = '📷 Ready - scan barcode';
+            }, 1500);
             return false;
         }
         
-        // Get title: priority = optionalTitle > fetched (offline cache/network) > fallback
-        let finalTitle = optionalTitle;
-        if (!finalTitle) {
-            scanStatusSpan.innerText = `📖 looking up title...`;
-            const fetched = await fetchBookTitleOfflineFirst(cleanIsbn);
-            if (fetched) {
-                finalTitle = fetched;
-            } else {
-                finalTitle = navigator.onLine ? `ISBN ${cleanIsbn}` : `ISBN ${cleanIsbn} (offline)`;
-            }
-        }
+        // Show scanning feedback
+        scanStatusSpan.innerText = `📖 Looking up "${cleanIsbn}"...`;
         
-        books.unshift({ isbn: cleanIsbn, title: finalTitle, timestamp: Date.now() });
+        // Fetch title
+        const title = await fetchBookTitle(cleanIsbn);
+        
+        // Add to library
+        books.unshift({ isbn: cleanIsbn, title: title, timestamp: Date.now() });
         saveToLocalStorage();
-        scanStatusSpan.innerText = `✅ added: ${cleanIsbn} · ${finalTitle.substring(0, 35)}`;
-        setTimeout(() => { if(isScanningActive) scanStatusSpan.innerText = '📷 ready - scan barcode'; }, 1800);
+        
+        // Show success
+        scanStatusSpan.innerText = `✅ Added: ${cleanIsbn}`;
+        setTimeout(() => {
+            if(isScanningActive) scanStatusSpan.innerText = '📷 Ready - scan barcode';
+        }, 2000);
+        
         return true;
     }
 
-    // ----- BARCODE SCANNER (works offline, no network required) -----
+    // Initialize camera with back camera
     async function initCameraScanner() {
         if (!video) return;
         
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-            scanStatusSpan.innerText = '❌ Browser doesn\'t support camera API';
-            console.error('getUserMedia not supported');
+            scanStatusSpan.innerText = '❌ Camera not supported';
+            debugInfo.innerText = 'Error: Your browser doesn\'t support camera access';
             return;
         }
         
         try {
             scanStatusSpan.innerText = '📷 Requesting back camera...';
             
-            // Try back camera first (environment facing)
+            // Try back camera first
             let stream;
             try {
                 stream = await navigator.mediaDevices.getUserMedia({ 
                     video: { facingMode: { exact: "environment" } }
                 });
+                debugInfo.innerText = '✅ Using back camera';
             } catch (err) {
-                // If exact fails, try 'environment' without exact (more compatible)
-                console.log('Exact environment failed, trying fallback...');
-                stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: "environment" }
-                });
+                console.log('Back camera failed, trying any camera:', err);
+                stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                debugInfo.innerText = '⚠️ Using default camera';
             }
             
             video.srcObject = stream;
             await video.play();
-            scanStatusSpan.innerText = '✅ Back camera ready · scanning offline';
+            scanStatusSpan.innerText = '✅ Ready - scan barcode';
             isScanningActive = true;
             
+            // Initialize ZXing scanner
             if (window.ZXing) {
-                const { BrowserMultiFormatReader } = window.ZXing;
-                const reader = new BrowserMultiFormatReader();
+                const { BrowserMultiFormatReader, DecodeHintType, BarcodeFormat } = window.ZXing;
+                const hints = new Map();
+                const formats = [BarcodeFormat.EAN_13, BarcodeFormat.EAN_8, BarcodeFormat.UPC_A, BarcodeFormat.CODE_128, BarcodeFormat.CODE_39];
+                hints.set(DecodeHintType.POSSIBLE_FORMATS, formats);
+                hints.set(DecodeHintType.TRY_HARDER, true);
+                
+                const reader = new BrowserMultiFormatReader(hints);
                 currentScanner = reader;
                 
+                let lastScanTime = 0;
+                const SCAN_COOLDOWN = 2000; // 2 seconds between scans
+                
                 await reader.decodeFromVideoElement(video, (result, err) => {
-                    if (result) {
+                    if (result && isScanningActive) {
+                        const now = Date.now();
+                        if (now - lastScanTime < SCAN_COOLDOWN) return;
+                        
                         const barcodeText = result.getText();
+                        console.log('Barcode detected:', barcodeText);
+                        
+                        // Extract ISBN (clean to digits)
                         let possibleIsbn = barcodeText.replace(/[^0-9X]/gi, '').toUpperCase();
+                        
+                        // Check if it looks like an ISBN
                         if (possibleIsbn.length === 10 || possibleIsbn.length === 13 || 
                             (possibleIsbn.length === 12 && /^\d+$/.test(possibleIsbn))) {
+                            lastScanTime = now;
                             addBook(possibleIsbn);
                         } else if (barcodeText.length >= 8 && /^\d+$/.test(barcodeText)) {
+                            // Try to use as-is if it's numeric
+                            lastScanTime = now;
                             addBook(barcodeText);
                         } else {
-                            scanStatusSpan.innerText = `⚠️ not a book code: ${barcodeText.substring(0,12)}`;
+                            debugInfo.innerText = `Detected: ${barcodeText} (not an ISBN)`;
+                            scanStatusSpan.innerText = `⚠️ Not a book barcode`;
                             setTimeout(() => {
-                                if(isScanningActive) scanStatusSpan.innerText = '📷 ready - scan barcode';
+                                if(isScanningActive) scanStatusSpan.innerText = '📷 Ready - scan barcode';
                             }, 1000);
                         }
                     }
                 });
+                
+                debugInfo.innerText = '✅ Scanner active - point at barcode';
             } else {
-                scanStatusSpan.innerText = '⚠️ scanner library error, reload page';
+                scanStatusSpan.innerText = '❌ Scanner library not loaded';
+                debugInfo.innerText = 'Error: ZXing library failed to load. Please refresh.';
             }
         } catch (err) {
             console.error("Camera error:", err);
-            scanStatusSpan.innerText = '❌ Back camera unavailable, trying default camera...';
-            
-            // Fallback to any camera if back camera fails
-            try {
-                const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: true });
-                video.srcObject = fallbackStream;
-                await video.play();
-                scanStatusSpan.innerText = '⚠️ Using default camera (not back camera)';
-                isScanningActive = true;
-                
-                // Continue with scanning...
-                if (window.ZXing) {
-                    const { BrowserMultiFormatReader } = window.ZXing;
-                    const reader = new BrowserMultiFormatReader();
-                    currentScanner = reader;
-                    await reader.decodeFromVideoElement(video, (result, err) => {
-                        if (result) {
-                            const barcodeText = result.getText();
-                            let possibleIsbn = barcodeText.replace(/[^0-9X]/gi, '').toUpperCase();
-                            if (possibleIsbn.length === 10 || possibleIsbn.length === 13) {
-                                addBook(possibleIsbn);
-                            }
-                        }
-                    });
-                }
-            } catch (fallbackErr) {
-                scanStatusSpan.innerText = '❌ No camera access. Use manual entry';
-                alert('Camera access denied or no camera found.\n\nOn iPhone: Settings → Safari → Camera → Allow\nOn Android: Settings → Apps → Browser → Permissions → Camera');
-            }
+            scanStatusSpan.innerText = '❌ Camera access denied';
+            debugInfo.innerText = `Error: ${err.message}. Please grant camera permission and refresh.`;
+            alert('Camera permission needed.\n\nOn iPhone: Settings → Safari → Camera → Allow\nOn Android: Settings → Apps → Chrome → Permissions → Camera');
         }
     }
-    
+
     // Manual add handler
     manualAddBtn.addEventListener('click', async () => {
         const rawIsbn = manualIsbnInput.value.trim();
@@ -650,7 +601,7 @@
         if (e.key === 'Enter') manualAddBtn.click();
     });
 
-    // Export functions (work offline)
+    // Export functions
     function exportToJson() {
         const dataStr = JSON.stringify(books, null, 2);
         downloadFile(dataStr, 'library_books.json', 'application/json');
@@ -666,7 +617,7 @@
     
     function exportToTxt() {
         if (books.length === 0) { alert("No books"); return; }
-        let txtContent = "===== LIBRARY ISBN LIST (Offline Scanner) =====\n";
+        let txtContent = "===== LIBRARY ISBN LIST =====\n";
         txtContent += `Generated: ${new Date().toLocaleString()}\n`;
         txtContent += `Total books: ${books.length}\n\n`;
         books.forEach((b, idx) => {
@@ -691,8 +642,10 @@
         if (confirm(`⚠️ Delete ALL ${books.length} scanned books?`)) {
             books = [];
             saveToLocalStorage();
-            scanStatusSpan.innerText = '🗑️ all cleared';
-            setTimeout(() => { if(isScanningActive) scanStatusSpan.innerText = '📷 ready - scan barcode'; }, 1400);
+            scanStatusSpan.innerText = '🗑️ All cleared';
+            setTimeout(() => { 
+                if(isScanningActive) scanStatusSpan.innerText = '📷 Ready - scan barcode'; 
+            }, 1400);
         }
     }
     
@@ -703,71 +656,7 @@
     
     // Initialize app
     loadStoredData();
-    initCameraScanner().catch(e => {
-        console.warn(e);
-        scanStatusSpan.innerText = '📱 manual mode: use ISBN field';
-    });
-</script>
-
-<!-- SERVICE WORKER FOR OFFLINE CACHING -->
-<script>
-    if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('/sw.js').then(reg => {
-            console.log('Service Worker registered');
-        }).catch(err => {
-            console.log('Service Worker failed:', err);
-        });
-        
-        // Also handle when page is loaded from cache
-        window.addEventListener('load', () => {
-            navigator.serviceWorker.ready.then(() => {
-                console.log('App ready for offline use');
-            });
-        });
-    }
-</script>
-
-<script id="sw-code" type="application/javascript">
-    // This code will be registered as service worker (injected inline for single-file offline)
-    (function() {
-        const swCode = `const CACHE_NAME = 'libscan-v2';
-const urlsToCache = [
-    './',
-    location.pathname,
-    'https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js'
-];
-
-self.addEventListener('install', event => {
-    event.waitUntil(
-        caches.open(CACHE_NAME).then(cache => cache.addAll(urlsToCache))
-    );
-});
-
-self.addEventListener('fetch', event => {
-    event.respondWith(
-        caches.match(event.request).then(response => {
-            if (response) return response;
-            return fetch(event.request).then(fetchResponse => {
-                if (!fetchResponse || fetchResponse.status !== 200) return fetchResponse;
-                const responseClone = fetchResponse.clone();
-                caches.open(CACHE_NAME).then(cache => {
-                    cache.put(event.request, responseClone);
-                });
-                return fetchResponse;
-            });
-        }).catch(() => {
-            return new Response('Offline: camera & scanning still works', { status: 200 });
-        })
-    );
-});`;
-        
-        // Create and register service worker blob
-        const blob = new Blob([swCode], {type: 'application/javascript'});
-        const swUrl = URL.createObjectURL(blob);
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register(swUrl).catch(e => console.log('SW reg failed, but app works locally'));
-        }
-    })();
+    initCameraScanner();
 </script>
 </body>
 </html>
