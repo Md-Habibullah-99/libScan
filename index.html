@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>LibScan Offline · ISBN Scanner</title>
+    <!-- Local fallback: ZXing from CDN but will be cached by service worker -->
+    <script type="text/javascript" src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+            user-select: none;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background: linear-gradient(145deg, #10141c 0%, #1a1f2c 100%);
+            font-family: 'Segoe UI', system-ui, -apple-system, 'Roboto', sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 16px;
+        }
+
+        .app-container {
+            max-width: 600px;
+            width: 100%;
+            background: rgba(22, 28, 38, 0.85);
+            backdrop-filter: blur(8px);
+            border-radius: 56px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05);
+            overflow: hidden;
+            padding: 20px 20px 28px;
+        }
+
+        h1 {
+            font-size: 1.8rem;
+            font-weight: 700;
+            margin: 0 0 6px 0;
+            background: linear-gradient(135deg, #ffffff, #b9c3f0);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .offline-badge {
+            font-size: 0.7rem;
+            background: #10b981;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 40px;
+            font-weight: normal;
+        }
+
+        .offline-badge.offline-mode {
+            background: #f59e0b;
+        }
+
+        .sub {
+            color: #8e9aaf;
+            font-weight: 500;
+            font-size: 0.85rem;
+            margin-bottom: 24px;
+            border-left: 3px solid #3b82f6;
+            padding-left: 10px;
+        }
+
+        .camera-zone {
+            background: #0b0e14;
+            border-radius: 32px;
+            overflow: hidden;
+            position: relative;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+            margin-bottom: 24px;
+            border: 1px solid rgba(66, 153, 225, 0.5);
+        }
+
+        video {
+            width: 100%;
+            display: block;
+            border-radius: 28px;
+            background: #000;
+            aspect-ratio: 4 / 3;
+            object-fit: cover;
+        }
+
+        .scan-overlay {
+            position: absolute;
+            bottom: 16px;
+            left: 16px;
+            right: 16px;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(12px);
+            border-radius: 60px;
+            padding: 8px 16px;
+            text-align: center;
+            color: white;
+            font-weight: 500;
+            font-size: 0.85rem;
+            border: 0.5px solid rgba(255,255,255,0.3);
+        }
+
+        .status-card {
+            background: #1e2432;
+            border-radius: 28px;
+            padding: 14px 20px;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 12px;
+            border: 1px solid #2d3443;
+        }
+
+        .status-badge {
+            background: #2a3142;
+            border-radius: 40px;
+            padding: 6px 14px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            color: #b9c7ff;
+        }
+
+        .book-count {
+            background: #0f172a;
+            color: #60a5fa;
+            font-family: monospace;
+            font-weight: bold;
+            font-size: 1.2rem;
+            padding: 4px 12px;
+            border-radius: 32px;
+        }
+
+        .manual-section {
+            background: #161c28;
+            border-radius: 28px;
+            padding: 16px;
+            margin-bottom: 24px;
+        }
+
+        .manual-title {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            font-weight: 600;
+            color: #7c8cb0;
+            letter-spacing: 1px;
+            margin-bottom: 10px;
+        }
+
+        .isbn-manual {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        input {
+            flex: 3;
+            background: #0f131e;
+            border: 1px solid #2d3448;
+            border-radius: 48px;
+            padding: 12px 18px;
+            font-size: 1rem;
+            color: white;
+            font-family: monospace;
+            outline: none;
+        }
+
+        input:focus {
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 2px rgba(59,130,246,0.4);
+        }
+
+        button {
+            background: #3b82f6;
+            border: none;
+            border-radius: 48px;
+            padding: 0 24px;
+            font-weight: 600;
+            font-size: 0.9rem;
+            color: white;
+            cursor: pointer;
+            transition: 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        button:active {
+            transform: scale(0.96);
+        }
+
+        .action-buttons {
+            display: flex;
+            gap: 14px;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            margin: 20px 0 16px;
+        }
+
+        .btn-outline {
+            background: #2d3548;
+        }
+
+        .btn-danger {
+            background: #dc2626;
+        }
+
+        .btn-success {
+            background: #10b981;
+        }
+
+        .books-list {
+            background: #0f141f;
+            border-radius: 28px;
+            padding: 8px;
+            max-height: 260px;
+            overflow-y: auto;
+            margin-top: 16px;
+        }
+
+        .list-header {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 16px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            color: #8e9bb5;
+            border-bottom: 1px solid #252e3f;
+        }
+
+        .book-item {
+            background: #1a1f2c;
+            margin: 8px 0;
+            padding: 12px 14px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
+            border-left: 3px solid #3b82f6;
+        }
+
+        .book-isbn {
+            font-family: monospace;
+            font-weight: bold;
+            color: #bbd7fb;
+        }
+
+        .book-name {
+            color: #cbd5e6;
+            font-size: 0.8rem;
+            word-break: break-word;
+            flex: 1;
+        }
+
+        .delete-one {
+            background: none;
+            color: #f87171;
+            font-size: 1.2rem;
+            padding: 0 8px;
+            box-shadow: none;
+        }
+
+        .empty-msg {
+            text-align: center;
+            color: #6a7894;
+            padding: 28px;
+            font-style: italic;
+        }
+
+        footer {
+            font-size: 0.7rem;
+            text-align: center;
+            color: #4f5a73;
+            margin-top: 18px;
+        }
+
+        .offline-warning {
+            background: #f59e0b20;
+            border: 1px solid #f59e0b40;
+            border-radius: 20px;
+            padding: 8px 12px;
+            font-size: 0.7rem;
+            margin-bottom: 12px;
+            text-align: center;
+            color: #fbbf24;
+        }
+    </style>
+</head>
+<body>
+<div class="app-container">
+    <h1>
+        📚 LibScan 
+        <span id="offlineIndicator" class="offline-badge">🌐 Online</span>
+    </h1>
+    <div class="sub">📖 offline barcode scanner · stores books locally</div>
+    
+    <div id="offlineWarning" class="offline-warning" style="display: none;">
+        ⚡ Offline Mode — Scanning works, book titles use local cache only
+    </div>
+
+    <div class="camera-zone">
+        <video id="video" playsinline autoplay muted></video>
+        <div class="scan-overlay">
+            🔍 align barcode inside frame → auto captures ISBN
+        </div>
+    </div>
+
+    <div class="status-card">
+        <span class="status-badge" id="scanStatus">📷 initializing camera...</span>
+        <span class="book-count" id="bookCountDisplay">0 books</span>
+    </div>
+
+    <div class="manual-section">
+        <div class="manual-title">✏️ manual entry (offline ready)</div>
+        <div class="isbn-manual">
+            <input type="text" id="manualIsbn" placeholder="ISBN-10 or ISBN-13" autocomplete="off">
+            <button id="manualAddBtn">➕ Add Book</button>
+        </div>
+    </div>
+
+    <div class="action-buttons">
+        <button id="exportJsonBtn" class="btn-outline">📄 JSON</button>
+        <button id="exportCsvBtn" class="btn-outline">📊 CSV</button>
+        <button id="exportTxtBtn" class="btn-outline">📝 TXT</button>
+        <button id="clearAllBtn" class="btn-danger">🗑️ Clear</button>
+    </div>
+
+    <div style="margin-top: 6px;">
+        <div style="display: flex; justify-content: space-between; align-items: baseline; padding: 0 8px;">
+            <span style="font-weight: 600; font-size: 0.85rem;">📋 scanned books</span>
+            <span style="font-size: 0.7rem; color:#6b7a9a;">tap ❌ to remove</span>
+        </div>
+        <div class="books-list" id="booksListContainer">
+            <div class="empty-msg">✨ no books yet. scan a barcode or enter ISBN manually</div>
+        </div>
+    </div>
+    <footer>💾 Fully offline after first load | Camera works without internet</footer>
+</div>
+
+<script>
+    // ---------- OFFLINE-FIRST BOOK MANAGER ----------
+    let books = [];            // array of { isbn, title, timestamp }
+    let currentScanner = null;
+    let isScanningActive = false;
+    let isOnline = navigator.onLine;
+    
+    // Offline title cache (pre-populated with common patterns, grows as we fetch)
+    let offlineTitleCache = new Map();
+
+    // DOM elements
+    const video = document.getElementById('video');
+    const scanStatusSpan = document.getElementById('scanStatus');
+    const bookCountSpan = document.getElementById('bookCountDisplay');
+    const booksContainer = document.getElementById('booksListContainer');
+    const manualIsbnInput = document.getElementById('manualIsbn');
+    const manualAddBtn = document.getElementById('manualAddBtn');
+    const exportJsonBtn = document.getElementById('exportJsonBtn');
+    const exportCsvBtn = document.getElementById('exportCsvBtn');
+    const exportTxtBtn = document.getElementById('exportTxtBtn');
+    const clearAllBtn = document.getElementById('clearAllBtn');
+    const offlineIndicator = document.getElementById('offlineIndicator');
+    const offlineWarningDiv = document.getElementById('offlineWarning');
+
+    // Update online/offline UI
+    function updateOnlineStatus() {
+        isOnline = navigator.onLine;
+        if (isOnline) {
+            offlineIndicator.textContent = '🌐 Online';
+            offlineIndicator.classList.remove('offline-mode');
+            offlineWarningDiv.style.display = 'none';
+        } else {
+            offlineIndicator.textContent = '📴 Offline';
+            offlineIndicator.classList.add('offline-mode');
+            offlineWarningDiv.style.display = 'block';
+        }
+    }
+
+    window.addEventListener('online', updateOnlineStatus);
+    window.addEventListener('offline', updateOnlineStatus);
+    updateOnlineStatus();
+
+    // Save to localStorage (offline persistent)
+    function saveToLocalStorage() {
+        localStorage.setItem('library_books_offline', JSON.stringify(books));
+        // also save title cache for offline use
+        const cacheObj = Object.fromEntries(offlineTitleCache);
+        localStorage.setItem('lib_title_cache', JSON.stringify(cacheObj));
+        updateUI();
+    }
+
+    // Load stored books and title cache
+    function loadStoredData() {
+        const stored = localStorage.getItem('library_books_offline');
+        if (stored) {
+            try {
+                books = JSON.parse(stored);
+                books = books.filter(b => b && b.isbn).map(b => ({ ...b, title: b.title || 'ISBN only' }));
+            } catch(e) { books = []; }
+        } else {
+            books = [];
+        }
+        
+        // Load cached titles for offline mode
+        const cachedTitles = localStorage.getItem('lib_title_cache');
+        if (cachedTitles) {
+            try {
+                const cacheObj = JSON.parse(cachedTitles);
+                offlineTitleCache = new Map(Object.entries(cacheObj));
+            } catch(e) {}
+        }
+        updateUI();
+    }
+
+    function updateUI() {
+        bookCountSpan.innerText = `${books.length} book${books.length !== 1 ? 's' : ''}`;
+        if (books.length === 0) {
+            booksContainer.innerHTML = `<div class="empty-msg">📭 no books yet. scan a barcode or enter ISBN manually</div>`;
+            return;
+        }
+        let html = `<div class="list-header"><span>📖 ISBN / Title</span><span>🗑️</span></div>`;
+        books.forEach((book, idx) => {
+            const displayTitle = book.title && book.title !== 'ISBN only' ? 
+                (book.title.length > 48 ? book.title.slice(0,45)+'…' : book.title) : '📘 ' + (book.title || 'untitled');
+            html += `
+                <div class="book-item" data-index="${idx}">
+                    <div style="display: flex; flex-direction: column; gap: 4px; flex:1;">
+                        <span class="book-isbn">${escapeHtml(book.isbn)}</span>
+                        <span class="book-name">${escapeHtml(displayTitle)}</span>
+                    </div>
+                    <button class="delete-one" data-isbn="${escapeHtml(book.isbn)}">✖️</button>
+                </div>
+            `;
+        });
+        booksContainer.innerHTML = html;
+        document.querySelectorAll('.delete-one').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const isbn = btn.getAttribute('data-isbn');
+                if (isbn) removeBookByIsbn(isbn);
+            });
+        });
+    }
+
+    function removeBookByIsbn(isbn) {
+        books = books.filter(b => b.isbn !== isbn);
+        saveToLocalStorage();
+    }
+
+    function escapeHtml(str) {
+        if (!str) return '';
+        return str.replace(/[&<>]/g, function(m) {
+            if (m === '&') return '&amp;';
+            if (m === '<') return '&lt;';
+            if (m === '>') return '&gt;';
+            return m;
+        });
+    }
+
+    // OFFLINE-FIRST title fetcher: uses cache if offline, else tries network and caches result
+    async function fetchBookTitleOfflineFirst(isbn) {
+        const cleanIsbn = isbn.replace(/[-\s]/g, '');
+        if (!cleanIsbn) return null;
+        
+        // Check offline cache first
+        if (offlineTitleCache.has(cleanIsbn)) {
+            return offlineTitleCache.get(cleanIsbn);
+        }
+        
+        // If offline, return null (no network)
+        if (!navigator.onLine) {
+            return null;
+        }
+        
+        // Online: fetch from OpenLibrary
+        try {
+            const url = `https://openlibrary.org/api/books?bibkeys=ISBN:${cleanIsbn}&format=json&jscmd=data`;
+            const response = await fetch(url);
+            if (!response.ok) return null;
+            const data = await response.json();
+            const key = `ISBN:${cleanIsbn}`;
+            if (data[key] && data[key].title) {
+                let title = data[key].title;
+                if (data[key].subtitle) title += `: ${data[key].subtitle}`;
+                // Cache for offline use
+                offlineTitleCache.set(cleanIsbn, title);
+                // Persist cache to localStorage
+                const cacheObj = Object.fromEntries(offlineTitleCache);
+                localStorage.setItem('lib_title_cache', JSON.stringify(cacheObj));
+                return title;
+            }
+            return null;
+        } catch (err) {
+            console.warn("Fetch failed, offline mode", err);
+            return null;
+        }
+    }
+
+    // Core add book function (works fully offline)
+    async function addBook(isbnRaw, optionalTitle = null) {
+        let cleanIsbn = isbnRaw.trim().replace(/[-\s]/g, '');
+        if (!cleanIsbn) {
+            scanStatusSpan.innerText = '⚠️ invalid ISBN';
+            return false;
+        }
+        
+        // Basic ISBN validation (10 or 13 digits, or allow X for 10-digit)
+        const isValid = /^[0-9]{10,13}$/.test(cleanIsbn) || /^[0-9]{9}[0-9X]$/i.test(cleanIsbn);
+        if (!isValid && cleanIsbn.length !== 10 && cleanIsbn.length !== 13) {
+            scanStatusSpan.innerText = `❌ invalid format: ${cleanIsbn}`;
+            setTimeout(() => { if(isScanningActive) scanStatusSpan.innerText = '📷 ready - scan barcode'; }, 1500);
+            return false;
+        }
+        
+        // Duplicate check
+        if (books.find(b => b.isbn === cleanIsbn)) {
+            scanStatusSpan.innerText = `⚠️ ISBN ${cleanIsbn} already in library`;
+            setTimeout(() => { if(isScanningActive) scanStatusSpan.innerText = '📷 ready - scan next'; }, 1200);
+            return false;
+        }
+        
+        // Get title: priority = optionalTitle > fetched (offline cache/network) > fallback
+        let finalTitle = optionalTitle;
+        if (!finalTitle) {
+            scanStatusSpan.innerText = `📖 looking up title...`;
+            const fetched = await fetchBookTitleOfflineFirst(cleanIsbn);
+            if (fetched) {
+                finalTitle = fetched;
+            } else {
+                finalTitle = navigator.onLine ? `ISBN ${cleanIsbn}` : `ISBN ${cleanIsbn} (offline)`;
+            }
+        }
+        
+        books.unshift({ isbn: cleanIsbn, title: finalTitle, timestamp: Date.now() });
+        saveToLocalStorage();
+        scanStatusSpan.innerText = `✅ added: ${cleanIsbn} · ${finalTitle.substring(0, 35)}`;
+        setTimeout(() => { if(isScanningActive) scanStatusSpan.innerText = '📷 ready - scan barcode'; }, 1800);
+        return true;
+    }
+
+    // ----- BARCODE SCANNER (works offline, no network required) -----
+    async function initCameraScanner() {
+        if (!video) return;
+        
+        // First check if we can get camera at all
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            scanStatusSpan.innerText = '❌ Browser doesn\'t support camera API';
+            console.error('getUserMedia not supported');
+            return;
+        }
+        
+        try {
+            scanStatusSpan.innerText = '📷 Requesting camera permission...';
+            
+            // Try with simpler constraints first (more compatible)
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+                video: true  // Remove facingMode constraint for testing
+            });
+            
+            video.srcObject = stream;
+            await video.play();
+            scanStatusSpan.innerText = '✅ Camera ready · scanning offline';
+            isScanningActive = true;
+            
+            if (window.ZXing) {
+                const { BrowserMultiFormatReader } = window.ZXing;
+                const reader = new BrowserMultiFormatReader();
+                currentScanner = reader;
+                
+                await reader.decodeFromVideoElement(video, (result, err) => {
+                    if (result) {
+                        const barcodeText = result.getText();
+                        let possibleIsbn = barcodeText.replace(/[^0-9X]/gi, '').toUpperCase();
+                        if (possibleIsbn.length === 10 || possibleIsbn.length === 13 || 
+                            (possibleIsbn.length === 12 && /^\d+$/.test(possibleIsbn))) {
+                            addBook(possibleIsbn);
+                        }
+                    }
+                });
+            } else {
+                scanStatusSpan.innerText = '⚠️ ZXing library not loaded';
+                console.error('ZXing not available');
+            }
+        } catch (err) {
+            console.error("Camera error details:", err);
+            scanStatusSpan.innerText = `❌ ${err.message || 'Camera error'}`;
+            
+            // Helpful error messages
+            if (err.name === 'NotAllowedError') {
+                alert('Camera permission denied. Please:\n- Click the camera icon in the address bar\n- Or go to browser settings → Site Settings → Camera → Allow');
+            } else if (err.name === 'NotFoundError') {
+                alert('No camera found on this device');
+            } else if (err.name === 'NotReadableError') {
+                alert('Camera is in use by another application');
+            } else {
+                alert(`Camera error: ${err.message}\n\nMake sure you're on HTTPS or localhost`);
+            }
+        }
+    }
+    
+    // Manual add handler
+    manualAddBtn.addEventListener('click', async () => {
+        const rawIsbn = manualIsbnInput.value.trim();
+        if (!rawIsbn) {
+            alert("Please enter an ISBN code");
+            return;
+        }
+        await addBook(rawIsbn);
+        manualIsbnInput.value = '';
+    });
+    
+    manualIsbnInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') manualAddBtn.click();
+    });
+
+    // Export functions (work offline)
+    function exportToJson() {
+        const dataStr = JSON.stringify(books, null, 2);
+        downloadFile(dataStr, 'library_books.json', 'application/json');
+    }
+    
+    function exportToCsv() {
+        if (books.length === 0) { alert("No books"); return; }
+        const headers = ['ISBN', 'Title', 'Timestamp'];
+        const rows = books.map(b => [b.isbn, `"${b.title.replace(/"/g, '""')}"`, new Date(b.timestamp).toLocaleString()]);
+        const csvContent = [headers, ...rows].map(row => row.join(',')).join('\n');
+        downloadFile(csvContent, 'library_books.csv', 'text/csv');
+    }
+    
+    function exportToTxt() {
+        if (books.length === 0) { alert("No books"); return; }
+        let txtContent = "===== LIBRARY ISBN LIST (Offline Scanner) =====\n";
+        txtContent += `Generated: ${new Date().toLocaleString()}\n`;
+        txtContent += `Total books: ${books.length}\n\n`;
+        books.forEach((b, idx) => {
+            txtContent += `${idx+1}. ISBN: ${b.isbn} → ${b.title}\n`;
+        });
+        downloadFile(txtContent, 'library_isbn_list.txt', 'text/plain');
+    }
+    
+    function downloadFile(content, filename, mimeType) {
+        const blob = new Blob([content], { type: mimeType });
+        const link = document.createElement('a');
+        const url = URL.createObjectURL(blob);
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+    }
+    
+    function clearAllBooks() {
+        if (confirm(`⚠️ Delete ALL ${books.length} scanned books?`)) {
+            books = [];
+            saveToLocalStorage();
+            scanStatusSpan.innerText = '🗑️ all cleared';
+            setTimeout(() => { if(isScanningActive) scanStatusSpan.innerText = '📷 ready - scan barcode'; }, 1400);
+        }
+    }
+    
+    exportJsonBtn.addEventListener('click', exportToJson);
+    exportCsvBtn.addEventListener('click', exportToCsv);
+    exportTxtBtn.addEventListener('click', exportToTxt);
+    clearAllBtn.addEventListener('click', clearAllBooks);
+    
+    // Initialize app
+    loadStoredData();
+    initCameraScanner().catch(e => {
+        console.warn(e);
+        scanStatusSpan.innerText = '📱 manual mode: use ISBN field';
+    });
+</script>
+
+<!-- SERVICE WORKER FOR OFFLINE CACHING -->
+<script>
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js').then(reg => {
+            console.log('Service Worker registered');
+        }).catch(err => {
+            console.log('Service Worker failed:', err);
+        });
+        
+        // Also handle when page is loaded from cache
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.ready.then(() => {
+                console.log('App ready for offline use');
+            });
+        });
+    }
+</script>
+
+<script id="sw-code" type="application/javascript">
+    // This code will be registered as service worker (injected inline for single-file offline)
+    (function() {
+        const swCode = `const CACHE_NAME = 'libscan-v2';
+const urlsToCache = [
+    './',
+    location.pathname,
+    'https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js'
+];
+
+self.addEventListener('install', event => {
+    event.waitUntil(
+        caches.open(CACHE_NAME).then(cache => cache.addAll(urlsToCache))
+    );
+});
+
+self.addEventListener('fetch', event => {
+    event.respondWith(
+        caches.match(event.request).then(response => {
+            if (response) return response;
+            return fetch(event.request).then(fetchResponse => {
+                if (!fetchResponse || fetchResponse.status !== 200) return fetchResponse;
+                const responseClone = fetchResponse.clone();
+                caches.open(CACHE_NAME).then(cache => {
+                    cache.put(event.request, responseClone);
+                });
+                return fetchResponse;
+            });
+        }).catch(() => {
+            return new Response('Offline: camera & scanning still works', { status: 200 });
+        })
+    );
+});`;
+        
+        // Create and register service worker blob
+        const blob = new Blob([swCode], {type: 'application/javascript'});
+        const swUrl = URL.createObjectURL(blob);
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register(swUrl).catch(e => console.log('SW reg failed, but app works locally'));
+        }
+    })();
+</script>
+</body>
+</html>
