@@ -377,3 +377,104 @@ body {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   NEW FEATURE STYLES — appended; no existing rules changed
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── FEATURE 1: Manual ISBN input ─────────────────────────────────────────── */
+.manual-input-row {
+  display: flex;
+  gap: 8px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--border);
+}
+
+.manual-input {
+  flex: 1;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 14px;
+  padding: 9px 12px;
+  outline: none;
+  transition: border-color 0.15s;
+  min-width: 0;
+}
+.manual-input::placeholder { color: var(--text-muted); font-family: var(--font); }
+.manual-input:focus { border-color: var(--accent); }
+
+.manual-error {
+  padding: 0 14px 10px;
+  font-size: 12px;
+  color: var(--danger);
+}
+
+/* ── FEATURE 2: Book metadata in list items ───────────────────────────────── */
+/* .isbn-body already exists; we add new children inside it */
+.book-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
+}
+.book-authors {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
+}
+/* isbn-num and isbn-time already styled; they appear below the new fields */
+
+/* ── FEATURE 3: Clear All button ──────────────────────────────────────────── */
+/* list-actions wraps both Clear All and the export row */
+.list-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.btn-danger-outline {
+  color: var(--danger) !important;
+  border-color: rgba(248,113,113,0.3) !important;
+}
+.btn-danger-outline:hover {
+  background: var(--danger-dim) !important;
+  border-color: var(--danger) !important;
+}
+
+/* ── FEATURE 5: Torch-on button state ────────────────────────────────────── */
+.btn-torch-on {
+  background: rgba(250,204,21,0.15);
+  border: 1px solid rgba(250,204,21,0.5);
+  color: #facc15;
+}
+.btn-torch-on:hover { opacity: 0.85; }
+
+/* Keep the controls row flexible so torch + stop sit side-by-side */
+.scanner-controls {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* ── FEATURE 6: Duplicate row flash ──────────────────────────────────────── */
+@keyframes dupFlash {
+  0%   { background: transparent; }
+  20%  { background: rgba(251,191,36,0.18); }
+  50%  { background: rgba(251,191,36,0.22); }
+  80%  { background: rgba(251,191,36,0.18); }
+  100% { background: transparent; }
+}
+.isbn-item--duplicate-flash {
+  animation: dupFlash 1s ease forwards !important;
+  border-radius: 6px;
+}
